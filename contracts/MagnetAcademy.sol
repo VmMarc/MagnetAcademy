@@ -3,15 +3,21 @@
 pragma solidity ^0.8.0;
 
 import "@openzeppelin/contracts/utils/Counters.sol";
+import "@openzeppelin/contracts/access/AccessControl.sol";
 import "./SchoolMagnet.sol";
+import "./DiploMagnet.sol";
 
-contract MagnetAcademy {
+contract MagnetAcademy is AccessControl {
     using Counters for Counters.Counter;
 
+    bytes32 public constant RECTOR_ROLE = keccak256("RECTOR_ROLE");
+    bytes32 public constant ADMIN_ROLE = keccak256("ADMIN_ROLE");
+    bytes32 public constant DIRECTOR_ROLE = keccak256("DIRECTOR_ROLE");
+
     address private _rector;
+    DiploMagnet private _diploMagnet;
     Counters.Counter private _nbSchools;
-    Counters.Counter private _schoolId;
-    mapping(address => bool) private _admins;
+    // Use Role
     mapping(address => address) private _schoolDirectors; // director to school
     mapping(address => address) private _schools; // school to director
 
@@ -20,16 +26,6 @@ contract MagnetAcademy {
     event SchoolCreated(address indexed schoolAddress, address indexed directorAddress, string name);
     event SchoolDeleted(address indexed schoolAddress, address indexed directorAddress);
     event DirectorSet(address indexed directorAddress, address indexed schoolAddress);
-
-    modifier OnlyRector() {
-        require(msg.sender == _rector, "MagnetAcademy: Only rector can perform this action");
-        _;
-    }
-
-    modifier OnlyAdmin() {
-        require(_admins[msg.sender] == true, "MagnetAcademy: Only administrators can perform this action");
-        _;
-    }
 
     modifier OnlySchoolDirector(address account) {
         require(_schoolDirectors[account] != address(0), "MagnetAcademy: Not a school director");
@@ -47,23 +43,28 @@ contract MagnetAcademy {
     }
 
     constructor(address rector_) {
+        _setupRole(DEFAULT_ADMIN_ROLE, msg.sender);
+        _setupRole(RECTOR_ROLE, rector_);
+        _setupRole(ADMIN_ROLE, rector_);
+        _setRoleAdmin(DIRECTOR_ROLE, ADMIN_ROLE);
+        _setRoleAdmin(ADMIN_ROLE, RECTOR_ROLE);
+        _diploMagnet = new DiploMagnet();
         _rector = rector_;
-        _admins[rector_] = true;
     }
 
-    function addAdmin(address account) public OnlyRector() {
-        _admins[account] = true;
+    function addAdmin(address account) public onlyRole(RECTOR_ROLE) {
+        grantRole(ADMIN_ROLE, account);
         emit AdminAdded(account);
     }
 
-    function revokeAdmin(address account) public OnlyRector() {
-        _admins[account] = false;
+    function revokeAdmin(address account) public onlyRole(RECTOR_ROLE) {
+        revokeRole(ADMIN_ROLE, account);
         emit AdminRevoked(account);
     }
 
     function changeSchoolDirector(address oldDirector, address newDirector)
         public
-        OnlyAdmin()
+        onlyRole(ADMIN_ROLE)
         OnlySchoolDirector(oldDirector)
         OnlyNotSchoolDirector(newDirector)
         returns (bool)
@@ -72,32 +73,53 @@ contract MagnetAcademy {
         _schoolDirectors[oldDirector] = address(0);
         _schoolDirectors[newDirector] = schoolAddress;
         _schools[schoolAddress] = newDirector;
+        grantRole(DIRECTOR_ROLE, newDirector);
+        revokeRole(DIRECTOR_ROLE, oldDirector);
         emit DirectorSet(newDirector, schoolAddress);
         return true;
     }
 
     function createSchool(string memory name, address directorAddress)
         public
-        OnlyAdmin()
+        onlyRole(ADMIN_ROLE)
         OnlyNotSchoolDirector(directorAddress)
         returns (bool)
     {
         SchoolMagnet school = new SchoolMagnet(name, directorAddress);
         _schoolDirectors[directorAddress] = address(school);
         _schools[address(school)] = directorAddress;
+        grantRole(DIRECTOR_ROLE, directorAddress);
         emit DirectorSet(directorAddress, address(school));
         _nbSchools.increment();
         emit SchoolCreated(address(school), directorAddress, name);
         return true;
     }
 
-    function deleteSchool(address schoolAddress) public OnlyAdmin() OnlySchoolAddress(schoolAddress) returns (bool) {
+    function deleteSchool(address schoolAddress)
+        public
+        onlyRole(ADMIN_ROLE)
+        OnlySchoolAddress(schoolAddress)
+        returns (bool)
+    {
         address directorAddress = _schools[schoolAddress];
         _schools[schoolAddress] = address(0);
         _schoolDirectors[directorAddress] = address(0);
+        revokeRole(DIRECTOR_ROLE, directorAddress);
         _nbSchools.decrement();
         emit SchoolDeleted(schoolAddress, directorAddress);
         return true;
+    }
+
+    function certify(address student) public onlyRole(DIRECTOR_ROLE) {
+        // TODO need more tests: is student registered at school of the director?
+        // Need to work more on SchoolMagnet contract for this.
+        _diploMagnet.certify(student, _schoolDirectors[msg.sender]);
+    }
+
+    //function certify()
+
+    function diploMagnet() public view returns (address) {
+        return address(_diploMagnet);
     }
 
     function nbSchools() public view returns (uint256) {
@@ -117,7 +139,7 @@ contract MagnetAcademy {
     }
 
     function isAdmin(address account) public view returns (bool) {
-        return _admins[account];
+        return hasRole(ADMIN_ROLE, account);
     }
 
     function isDirector(address account) public view returns (bool) {

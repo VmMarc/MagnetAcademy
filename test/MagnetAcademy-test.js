@@ -1,3 +1,4 @@
+/* eslint-disable max-len */
 /* eslint-disable comma-dangle */
 /* eslint-disable no-unused-expressions */
 /* eslint-disable no-unused-vars */
@@ -20,6 +21,9 @@ describe('MagnetAcademy', function () {
     magnetAcademy;
   const school1Name = 'School1';
   const school2Name = 'School2';
+  const DEFAULT_ADMIN_ROLE = ethers.constants.HashZero;
+  const RECTOR_ROLE = ethers.utils.id('RECTOR_ROLE');
+  const ADMIN_ROLE = ethers.utils.id('ADMIN_ROLE');
   beforeEach(async function () {
     [deployer, rector, academyAdmin1, academyAdmin2, lambdaUser, lambdaAddress, director1, director2, director3] =
       await ethers.getSigners();
@@ -32,81 +36,96 @@ describe('MagnetAcademy', function () {
     it('Should have a rector', async function () {
       expect(await magnetAcademy.rector()).to.equal(rector.address);
     });
-
     it('Should have rector as administrator', async function () {
       expect(await magnetAcademy.isAdmin(rector.address)).to.be.true;
     });
     it('Should have 0 school created in the academy at deployment', async function () {
       expect(await magnetAcademy.nbSchools()).to.equal(0);
     });
+    it('Should have a DiploMagnet address', async function () {
+      expect(await magnetAcademy.diploMagnet()).to.not.equal(ethers.constants.AddressZero);
+    });
+    it('Rector should have DEFAULT_ADMIN_ROLE', async function () {
+      expect(await magnetAcademy.hasRole(DEFAULT_ADMIN_ROLE, deployer.address)).to.be.true;
+    });
+    it('Rector should have RECTOR_ROLE', async function () {
+      expect(await magnetAcademy.hasRole(RECTOR_ROLE, rector.address)).to.be.true;
+    });
+    it('Rector should have ADMIN_ROLE', async function () {
+      expect(await magnetAcademy.hasRole(ADMIN_ROLE, rector.address)).to.be.true;
+    });
   });
 
   describe('Administrators system management', function () {
+    let ADMIN_ROLE, RECTOR_ROLE;
     beforeEach(async function () {
+      ADMIN_ROLE = await magnetAcademy.ADMIN_ROLE();
+      RECTOR_ROLE = await magnetAcademy.RECTOR_ROLE();
       // academyAdmin1 is an admin for our tests
-      await magnetAcademy.connect(rector).addAdmin(academyAdmin1.address);
+      await magnetAcademy.connect(rector).grantRole(await magnetAcademy.ADMIN_ROLE(), academyAdmin1.address);
     });
 
     it('A rector should be able to nominate an admin', async function () {
-      await magnetAcademy.connect(rector).addAdmin(academyAdmin2.address);
+      await magnetAcademy.connect(rector).grantRole(ADMIN_ROLE, academyAdmin2.address);
       expect(await magnetAcademy.isAdmin(academyAdmin2.address)).to.be.true;
     });
-    it('Should emit AdminAdded event when admin is added', async function () {
-      await expect(magnetAcademy.connect(rector).addAdmin(academyAdmin2.address))
-        .to.emit(magnetAcademy, 'AdminAdded')
-        .withArgs(academyAdmin2.address);
+    it('Should emit RoleGranted event when admin is added', async function () {
+      await expect(magnetAcademy.connect(rector).grantRole(ADMIN_ROLE, academyAdmin2.address))
+        .to.emit(magnetAcademy, 'RoleGranted')
+        .withArgs(ADMIN_ROLE, academyAdmin2.address, rector.address);
     });
     it('Only rector can add a a new admin', async function () {
-      // add a new admin
-      await magnetAcademy.connect(rector).addAdmin(academyAdmin1.address);
       // a lambda user can not add a new admin
-      await expect(
-        magnetAcademy.connect(lambdaUser).addAdmin(academyAdmin2.address),
+      await expect(magnetAcademy.connect(lambdaUser).grantRole(ADMIN_ROLE, academyAdmin2.address),
         'a lambda user can not add a new admin'
-      ).to.be.revertedWith('MagnetAcademy: Only rector can perform this action');
+      // eslint-disable-next-line max-len
+      ).to.be.revertedWith(`AccessControl: account ${lambdaUser.address.toLowerCase()} is missing role ${RECTOR_ROLE.toLowerCase()}`);
       // an admin can not add a new admin
       await expect(
-        magnetAcademy.connect(academyAdmin1).addAdmin(academyAdmin2.address),
+        magnetAcademy.connect(academyAdmin1).grantRole(ADMIN_ROLE, academyAdmin2.address),
         'an admin can not add a new admin'
-      ).to.be.revertedWith('MagnetAcademy: Only rector can perform this action');
+      // eslint-disable-next-line max-len
+      ).to.be.revertedWith(`AccessControl: account ${academyAdmin1.address.toLowerCase()} is missing role ${RECTOR_ROLE.toLowerCase()}`);
     });
     it('A rector should be able to revoke an admin', async function () {
-      expect(await magnetAcademy.isAdmin(academyAdmin1.address), 'academyAdmin1 should be an admin').to.be.true;
-      await magnetAcademy.connect(rector).revokeAdmin(academyAdmin1.address);
+      await magnetAcademy.connect(rector).grantRole(ADMIN_ROLE, academyAdmin1.address);
+      await magnetAcademy.connect(rector).revokeRole(ADMIN_ROLE, academyAdmin1.address);
       expect(await magnetAcademy.isAdmin(academyAdmin1.address)).to.be.false;
     });
-    it('Should emit AdminRevoked event when admin is revoked', async function () {
-      expect(await magnetAcademy.isAdmin(academyAdmin1.address), 'academyAdmin1 should be an admin').to.be.true;
-      await expect(magnetAcademy.connect(rector).revokeAdmin(academyAdmin1.address))
-        .to.emit(magnetAcademy, 'AdminRevoked')
-        .withArgs(academyAdmin1.address);
+    it('Should emit RoleRevoked event when admin is revoked', async function () {
+      await magnetAcademy.connect(rector).grantRole(ADMIN_ROLE, academyAdmin1.address);
+      await expect(magnetAcademy.connect(rector).revokeRole(ADMIN_ROLE, academyAdmin1.address))
+        .to.emit(magnetAcademy, 'RoleRevoked')
+        .withArgs(ADMIN_ROLE, academyAdmin1.address, rector.address);
     });
     it('Only rector can revoke an admin', async function () {
       // add a new admin
-      await magnetAcademy.connect(rector).addAdmin(academyAdmin2.address);
+      await magnetAcademy.connect(rector).grantRole(ADMIN_ROLE, academyAdmin2.address);
       // a lambda user can not revoke an admin
       await expect(
-        magnetAcademy.connect(lambdaUser).revokeAdmin(academyAdmin2.address),
+        magnetAcademy.connect(lambdaUser).revokeRole(ADMIN_ROLE, academyAdmin2.address),
         'a lambda user can not revoke an admin'
-      ).to.be.revertedWith('MagnetAcademy: Only rector can perform this action');
+      ).to.be.revertedWith(`AccessControl: account ${lambdaUser.address.toLowerCase()} is missing role ${RECTOR_ROLE.toLowerCase()}`);
       // an admin can not revoke an admin
       await expect(
-        magnetAcademy.connect(academyAdmin1).revokeAdmin(academyAdmin2.address),
+        magnetAcademy.connect(academyAdmin1).revokeRole(ADMIN_ROLE, academyAdmin2.address),
         'an admin can not revoke an admin'
-      ).to.be.revertedWith('MagnetAcademy: Only rector can perform this action');
+      ).to.be.revertedWith(`AccessControl: account ${academyAdmin1.address.toLowerCase()} is missing role ${RECTOR_ROLE.toLowerCase()}`);
     });
   });
 
   describe('School creation', function () {
-    let school1Address, tx;
+    let school1Address, tx, ADMIN_ROLE;
     beforeEach(async function () {
+      ADMIN_ROLE = await magnetAcademy.ADMIN_ROLE();
+
       // compute school1Address before deployment
       school1Address = ethers.utils.getContractAddress({
         from: magnetAcademy.address,
         nonce: await ethers.provider.getTransactionCount(magnetAcademy.address),
       });
       // Set academyAdmin1 as an admin of the academy
-      await magnetAcademy.connect(rector).addAdmin(academyAdmin1.address);
+      await magnetAcademy.connect(rector).grantRole(ADMIN_ROLE, academyAdmin1.address);
       // Deploy School1
       tx = await magnetAcademy.connect(academyAdmin1).createSchool(school1Name, director1.address);
     });
@@ -136,7 +155,7 @@ describe('MagnetAcademy', function () {
     });
     it('Should revert if not created by admin', async function () {
       await expect(magnetAcademy.connect(lambdaUser).createSchool(school2Name, director2.address)).to.be.revertedWith(
-        'MagnetAcademy: Only administrators can perform this action'
+        'AccessControl: account 0x15d34aaf54267db7d7c367839aaf71a00a2c6a65 is missing role 0xa49807205ce4d355092ef5a8a18f56e8913cf4a201fbe287825b095693c21775'
       );
     });
     it('Should revert if director of new school is already mapped to a school', async function () {
@@ -146,15 +165,17 @@ describe('MagnetAcademy', function () {
     });
   });
   describe('School destruction', function () {
-    let school1Address;
+    let school1Address, ADMIN_ROLE, RECTOR_ROLE;
     beforeEach(async function () {
+      ADMIN_ROLE = await magnetAcademy.ADMIN_ROLE();
+      RECTOR_ROLE = await magnetAcademy.RECTOR_ROLE();
       // compute school1Address before deployment
       school1Address = ethers.utils.getContractAddress({
         from: magnetAcademy.address,
         nonce: await ethers.provider.getTransactionCount(magnetAcademy.address),
       });
       // Set academyAdmin1 as an admin of the academy
-      await magnetAcademy.connect(rector).addAdmin(academyAdmin1.address);
+      await magnetAcademy.connect(rector).grantRole(ADMIN_ROLE, academyAdmin1.address);
       // Deploy School1
       await magnetAcademy.connect(academyAdmin1).createSchool(school1Name, director1.address);
     });
@@ -183,7 +204,7 @@ describe('MagnetAcademy', function () {
     });
     it('Should revert if not deleted by an admin', async function () {
       await expect(magnetAcademy.connect(lambdaUser).deleteSchool(school1Address)).to.be.revertedWith(
-        'MagnetAcademy: Only administrators can perform this action'
+        'AccessControl: account 0x15d34aaf54267db7d7c367839aaf71a00a2c6a65 is missing role 0xa49807205ce4d355092ef5a8a18f56e8913cf4a201fbe287825b095693c21775'
       );
     });
     it('Should revert if school does not exist', async function () {
@@ -193,15 +214,17 @@ describe('MagnetAcademy', function () {
     });
   });
   describe('School Directors changes', function () {
-    let school1Address, tx;
+    let school1Address, tx, ADMIN_ROLE, RECTOR_ROLE;
     beforeEach(async function () {
+      ADMIN_ROLE = await magnetAcademy.ADMIN_ROLE();
+      RECTOR_ROLE = await magnetAcademy.RECTOR_ROLE();
       // compute school1Address before deployment
       school1Address = ethers.utils.getContractAddress({
         from: magnetAcademy.address,
         nonce: await ethers.provider.getTransactionCount(magnetAcademy.address),
       });
       // Set academyAdmin1 as an admin of the academy
-      await magnetAcademy.connect(rector).addAdmin(academyAdmin1.address);
+      await magnetAcademy.connect(rector).grantRole(ADMIN_ROLE, academyAdmin1.address);
       // Deploy School1
       tx = await magnetAcademy.connect(academyAdmin1).createSchool(school1Name, director1.address);
     });
@@ -235,7 +258,7 @@ describe('MagnetAcademy', function () {
     it('Should revert if directors are not changed by admin', async function () {
       await expect(
         magnetAcademy.connect(lambdaUser).changeSchoolDirector(director1.address, director2.address)
-      ).to.be.revertedWith('MagnetAcademy: Only administrators can perform this action');
+      ).to.be.revertedWith('AccessControl: account 0x15d34aaf54267db7d7c367839aaf71a00a2c6a65 is missing role 0xa49807205ce4d355092ef5a8a18f56e8913cf4a201fbe287825b095693c21775');
     });
     it('Should revert if old director is not mapped to a school', async function () {
       await expect(
